@@ -2,16 +2,14 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import JSZip from 'jszip';
-import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// In-Memory Database Store (with sample initialized data for immediate rich experience)
+// In-Memory Database Store
 interface UserStore {
   id: string;
   name: string;
@@ -372,14 +370,12 @@ let deviceLogs: DeviceLog[] = [];
 // Helper to award referral bonus upon first approved gmail
 function checkAndAwardReferralBonus(user: UserStore) {
   if (!user.referredBy) return;
-  // Check if this was their very first approved submission
   if (user.approvedSubmissions === 1) {
     const referrer = users.find((u) => u.promoCode.toUpperCase() === user.referredBy?.toUpperCase());
     if (referrer) {
       const bonus = appSettings.referralBonus || 10;
       referrer.balance += bonus;
       referrer.referralEarned += bonus;
-      console.log(`[Referral Reward] Referrer ${referrer.name} (${referrer.promoCode}) awarded ${bonus} BDT for user ${user.name}'s first approved Gmail.`);
     }
   }
 }
@@ -418,7 +414,7 @@ function calculateEntropy(str: string): number {
 
 export interface VerificationResult {
   isValid: boolean;
-  score: number; // 0 - 100
+  score: number;
   reason?: string;
   checks: {
     formatCheck: boolean;
@@ -448,7 +444,6 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
 
   let score = 0;
 
-  // 1. Basic Format check
   const emailParts = cleanEmail.split('@');
   if (emailParts.length !== 2) {
     return {
@@ -465,7 +460,6 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
   score += 15;
   details.push('Syntax format validated');
 
-  // 2. Google Domain Check
   if (domain !== 'gmail.com' && domain !== 'googlemail.com') {
     return {
       isValid: false,
@@ -479,7 +473,6 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
   score += 20;
   details.push('Google MX domain (@gmail.com) verified');
 
-  // 3. Username Length & Character Rules (Google official: 6-30 chars)
   if (username.length < 6 || username.length > 30) {
     return {
       isValid: false,
@@ -500,7 +493,6 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
     };
   }
 
-  // 4. Entropy & Bot / Keyboard Mash Pattern Detection
   const entropy = calculateEntropy(username.replace(/\./g, ''));
   const isRepetitive = /^(.)\1+$/.test(username.replace(/\./g, ''));
   const isKeyboardMash = /asdfgh|qwerty|zxcvbn|123456/.test(username);
@@ -518,7 +510,6 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
   score += 20;
   details.push('Username entropy and human-pattern score verified');
 
-  // 5. Password Security & Minimum Google Requirements (min 8 chars, not blacklisted)
   if (cleanPass.length < 8) {
     return {
       isValid: false,
@@ -542,7 +533,6 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
   score += 20;
   details.push('Password strength & complexity meet Google standards');
 
-  // 6. Recovery Email Integrity & Disposable Check
   if (!cleanRec.includes('@') || cleanRec.length < 6) {
     return {
       isValid: false,
@@ -577,7 +567,6 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
   score += 15;
   details.push('Recovery email integrity and non-disposable domain verified');
 
-  // 7. Google MX DNS Probe Handshake Simulation
   checks.mxDnsProbe = true;
   score += 10;
   details.push('MX host gmail-smtp-in.l.google.com reached & verified');
@@ -593,6 +582,15 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
 // -------------------------------------------------------------
 // REST API ROUTES
 // -------------------------------------------------------------
+
+// Root Route
+app.get('/', (req, res) => {
+  res.json({
+    status: 'success',
+    message: 'GmailBazar Backend API is running live on Render!',
+    timestamp: new Date().toISOString()
+  });
+});
 
 // 1. Settings & Config
 app.get('/api/settings', (req, res) => {
@@ -610,7 +608,7 @@ app.put('/api/settings', (req, res) => {
   res.json({ success: true, settings: appSettings, message: 'Settings updated successfully' });
 });
 
-// Full Project ZIP Archive Generator & Downloader Endpoint
+// Full Project ZIP Archive Generator
 function addDirectoryToZip(zip: JSZip, rootPath: string, currentPath: string = '') {
   const fullPath = path.join(rootPath, currentPath);
   if (!fs.existsSync(fullPath)) return;
@@ -618,7 +616,6 @@ function addDirectoryToZip(zip: JSZip, rootPath: string, currentPath: string = '
 
   for (const entry of entries) {
     const relativePath = currentPath ? `${currentPath}/${entry.name}` : entry.name;
-    // Exclude unwanted directories and large caches
     if (
       entry.name === 'node_modules' ||
       entry.name === 'dist' ||
@@ -677,7 +674,6 @@ app.post('/api/auth/register', (req, res) => {
     return res.status(400).json({ success: false, error: 'An account with this email already exists' });
   }
 
-  // Anti-fraud Fingerprint Check: Allow registration but track device fingerprint
   const cleanFingerprint = deviceFingerprint || `fp_${Math.random().toString(36).substring(2, 10)}`;
   const sameDeviceAccounts = users.filter((u) => u.deviceFingerprint === cleanFingerprint);
   
@@ -696,7 +692,6 @@ app.post('/api/auth/register', (req, res) => {
     }
   }
 
-  // Generate unique Promo Code for new user
   const baseName = name.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 5) || 'USER';
   const randomSuffix = Math.floor(100 + Math.random() * 900);
   const newPromoCode = `${baseName}${randomSuffix}`;
@@ -732,7 +727,7 @@ app.post('/api/auth/register', (req, res) => {
     success: true,
     user: newUser,
     message: validReferrerPromo
-      ? `Account created with referral code ${validReferrerPromo}. (Referrer earns 10 BDT upon your first approved submission!)`
+      ? `Account created with referral code ${validReferrerPromo}.`
       : 'Account created successfully!',
   });
 });
@@ -745,13 +740,11 @@ app.post('/api/auth/login', (req, res) => {
 
   let user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
 
-  // Quick switcher support: If admin role requested and email matches admin
   if (role === 'admin' && !user) {
     user = users.find((u) => u.role === 'admin');
   }
 
   if (!user) {
-    // If user not found, auto-create a standard seller session for demo convenience
     const newPromo = `USER${Math.floor(100 + Math.random() * 900)}`;
     user = {
       id: `usr_${Date.now()}`,
@@ -781,7 +774,6 @@ app.post('/api/auth/login', (req, res) => {
 app.get('/api/users/current', (req, res) => {
   const userId = req.query.userId as string;
   if (!userId) {
-    // Return primary demo user
     return res.json({ success: true, user: users[1] });
   }
   const user = users.find((u) => u.id === userId);
@@ -791,7 +783,7 @@ app.get('/api/users/current', (req, res) => {
   res.json({ success: true, user });
 });
 
-// 3. Gmail Submissions & Format Processing
+// 3. Gmail Submissions
 app.get('/api/user/submissions', (req, res) => {
   const userId = req.query.userId as string;
   if (!userId) {
@@ -818,7 +810,6 @@ app.post('/api/user/submissions', (req, res) => {
 
   let accountsToProcess: Array<{ email: string; password: string; recoveryEmail: string }> = [];
 
-  // Parse raw text or structured items
   if (items && Array.isArray(items) && items.length > 0) {
     accountsToProcess = items;
   } else if (rawText && typeof rawText === 'string') {
@@ -844,7 +835,6 @@ app.post('/api/user/submissions', (req, res) => {
     });
   }
 
-  // Duplicate Check: Check against all database submissions
   const existingEmails = new Set(gmailSubmissions.map((s) => s.email.toLowerCase()));
   const acceptedItems: GmailStore[] = [];
   const duplicateEmails: string[] = [];
@@ -878,12 +868,11 @@ app.post('/api/user/submissions', (req, res) => {
   if (acceptedItems.length === 0) {
     return res.status(400).json({
       success: false,
-      error: `All ${accountsToProcess.length} accounts were rejected because they are duplicates already existing in the system.`,
+      error: `All ${accountsToProcess.length} accounts were rejected because they are duplicates.`,
       duplicateEmails,
     });
   }
 
-  // Process Automatic Verification or Queue
   const autoVerifyEnabled = appSettings.autoVerifyGmails !== false;
   let autoApprovedCount = 0;
   let autoRejectedCount = 0;
@@ -903,7 +892,7 @@ app.post('/api/user/submissions', (req, res) => {
         autoApprovedCount++;
       } else {
         newSub.status = 'rejected';
-        newSub.rejectReason = verResult.reason || 'Auto-Rejected: Security & syntax integrity check failed';
+        newSub.rejectReason = verResult.reason || 'Auto-Rejected';
         autoRejectedCount++;
       }
     } else {
@@ -911,16 +900,15 @@ app.post('/api/user/submissions', (req, res) => {
     }
   }
 
-  // Add to database
   gmailSubmissions.unshift(...acceptedItems);
   user.totalSubmissions += acceptedItems.length;
 
   let responseMessage = '';
   if (autoVerifyEnabled) {
     const earnedNow = autoApprovedCount * rate;
-    responseMessage = `⚡ Automated Live Verification Finished: ${autoApprovedCount} Approved (+৳${earnedNow} BDT credited to wallet), ${autoRejectedCount} Fake/Invalid Rejected. (${duplicateEmails.length} duplicates skipped)`;
+    responseMessage = `⚡ Live Verification: ${autoApprovedCount} Approved (+৳${earnedNow} BDT), ${autoRejectedCount} Rejected.`;
   } else {
-    responseMessage = `Successfully submitted ${acceptedItems.length} ${type.toUpperCase()} Gmail(s) to Admin verification queue! (${duplicateEmails.length} duplicates skipped)`;
+    responseMessage = `Successfully submitted ${acceptedItems.length} ${type.toUpperCase()} Gmail(s) to Admin verification queue!`;
   }
 
   res.status(201).json({
@@ -978,7 +966,6 @@ app.post('/api/user/withdrawals', (req, res) => {
     return res.status(400).json({ success: false, error: 'Please provide a valid 11-digit mobile wallet number.' });
   }
 
-  // Deduct balance
   user.balance -= numAmount;
 
   const newWth: WithdrawalStore = {
@@ -1001,7 +988,7 @@ app.post('/api/user/withdrawals', (req, res) => {
     success: true,
     withdrawal: newWth,
     newBalance: user.balance,
-    message: `Withdrawal request of ${numAmount} BDT via ${newWth.method} submitted successfully. Admin will process it shortly.`,
+    message: `Withdrawal request of ${numAmount} BDT via ${newWth.method} submitted successfully.`,
   });
 });
 
@@ -1100,7 +1087,6 @@ app.get('/api/admin/submissions', (req, res) => {
   res.json({ success: true, submissions: list });
 });
 
-// Single Submission Status Action
 app.put('/api/admin/submissions/:id/status', (req, res) => {
   const { id } = req.params;
   const { status, rejectReason } = req.body;
@@ -1124,7 +1110,6 @@ app.put('/api/admin/submissions/:id/status', (req, res) => {
       checkAndAwardReferralBonus(seller);
     }
   } else if (status === 'rejected' && previousStatus === 'approved') {
-    // Revert balance if previously approved
     if (seller) {
       seller.balance = Math.max(0, seller.balance - sub.ratePerAccount);
       seller.approvedSubmissions = Math.max(0, seller.approvedSubmissions - 1);
@@ -1134,7 +1119,6 @@ app.put('/api/admin/submissions/:id/status', (req, res) => {
   res.json({ success: true, submission: sub, message: `Submission updated to ${status}` });
 });
 
-// Batch Submissions Action (e.g. Approve 50 items at once)
 app.post('/api/admin/submissions/batch-action', (req, res) => {
   const { ids, action, rejectReason } = req.body;
   if (!ids || !Array.isArray(ids) || ids.length === 0) {
@@ -1160,7 +1144,7 @@ app.post('/api/admin/submissions/batch-action', (req, res) => {
       updatedCount++;
     } else if (action === 'reject') {
       sub.status = 'rejected';
-      sub.rejectReason = rejectReason || 'Format error / Inactive credentials';
+      sub.rejectReason = rejectReason || 'Format error';
       if (prev === 'approved' && seller) {
         seller.balance = Math.max(0, seller.balance - sub.ratePerAccount);
         seller.approvedSubmissions = Math.max(0, seller.approvedSubmissions - 1);
@@ -1172,82 +1156,10 @@ app.post('/api/admin/submissions/batch-action', (req, res) => {
   res.json({
     success: true,
     updatedCount,
-    message: `Batch action "${action}" successfully executed on ${updatedCount} submissions.`,
+    message: `Batch action "${action}" successfully executed.`,
   });
 });
 
-// Admin Automated Batch Scanner (Scan pending items with auto-verifier)
-app.post('/api/admin/submissions/auto-check-batch', (req, res) => {
-  const { ids } = req.body;
-  const targetSubs = ids && Array.isArray(ids) && ids.length > 0
-    ? gmailSubmissions.filter((s) => ids.includes(s.id))
-    : gmailSubmissions.filter((s) => s.status === 'pending');
-
-  let approvedCount = 0;
-  let rejectedCount = 0;
-  const results: Array<{ id: string; email: string; status: string; score: number; reason?: string }> = [];
-
-  for (const sub of targetSubs) {
-    const verResult = verifyGmailAccount(sub.email, sub.password, sub.recoveryEmail);
-    sub.verificationScore = verResult.score;
-    sub.verifiedVia = 'auto_verifier';
-
-    const prev = sub.status;
-    const seller = users.find((u) => u.id === sub.userId);
-
-    if (verResult.isValid) {
-      sub.status = 'approved';
-      sub.approvedAt = new Date().toISOString();
-      if (prev !== 'approved' && seller) {
-        seller.balance += sub.ratePerAccount;
-        seller.approvedSubmissions += 1;
-        checkAndAwardReferralBonus(seller);
-      }
-      approvedCount++;
-    } else {
-      sub.status = 'rejected';
-      sub.rejectReason = verResult.reason || 'Auto-Rejected by Diagnostic Engine';
-      if (prev === 'approved' && seller) {
-        seller.balance = Math.max(0, seller.balance - sub.ratePerAccount);
-        seller.approvedSubmissions = Math.max(0, seller.approvedSubmissions - 1);
-      }
-      rejectedCount++;
-    }
-
-    results.push({
-      id: sub.id,
-      email: sub.email,
-      status: sub.status,
-      score: verResult.score,
-      reason: sub.rejectReason,
-    });
-  }
-
-  res.json({
-    success: true,
-    scannedTotal: targetSubs.length,
-    approvedCount,
-    rejectedCount,
-    results,
-    message: `Automated scan completed on ${targetSubs.length} account(s): ${approvedCount} Approved, ${rejectedCount} Rejected.`,
-  });
-});
-
-// Admin Live Diagnostic Single Tester API
-app.post('/api/admin/verify-single-test', (req, res) => {
-  const { email, password, recoveryEmail } = req.body;
-  if (!email) {
-    return res.status(400).json({ success: false, error: 'Email is required' });
-  }
-
-  const result = verifyGmailAccount(email, password || '', recoveryEmail || '');
-  res.json({
-    success: true,
-    result,
-  });
-});
-
-// Structured Approved List Output (Requirement 3)
 app.get('/api/admin/approved-export', (req, res) => {
   const { type } = req.query;
   let approvedList = gmailSubmissions.filter((s) => s.status === 'approved');
@@ -1256,9 +1168,6 @@ app.get('/api/admin/approved-export', (req, res) => {
     approvedList = approvedList.filter((s) => s.submissionType === type);
   }
 
-  // Format as numbered sequential:
-  // 1. email1@gmail.com:pass1:rec1@gmail.com
-  // 2. email2@gmail.com:pass2:rec2@gmail.com
   const formattedNumberedLines = approvedList.map(
     (item, index) => `${index + 1}. ${item.email}:${item.password}:${item.recoveryEmail}`
   );
@@ -1276,7 +1185,6 @@ app.get('/api/admin/approved-export', (req, res) => {
   });
 });
 
-// Admin Withdrawals Management
 app.get('/api/admin/withdrawals', (req, res) => {
   res.json({ success: true, withdrawals });
 });
@@ -1294,16 +1202,15 @@ app.put('/api/admin/withdrawals/:id/status', (req, res) => {
 
   if (status === 'paid') {
     if (!trxId || !trxId.trim()) {
-      return res.status(400).json({ success: false, error: 'Transaction ID (TrxID) is required to mark as Paid.' });
+      return res.status(400).json({ success: false, error: 'Transaction ID is required' });
     }
     wth.status = 'paid';
     wth.trxId = trxId.trim();
     wth.processedAt = new Date().toISOString();
   } else if (status === 'rejected') {
     wth.status = 'rejected';
-    wth.rejectReason = rejectReason || 'Invalid account details / Number unreachable';
+    wth.rejectReason = rejectReason || 'Invalid details';
     wth.processedAt = new Date().toISOString();
-    // Refund balance back to user
     if (seller) {
       seller.balance += wth.amount;
     }
@@ -1312,132 +1219,16 @@ app.put('/api/admin/withdrawals/:id/status', (req, res) => {
   res.json({ success: true, withdrawal: wth, message: `Withdrawal marked as ${status}` });
 });
 
-// Admin User Management & Balance Adjustment
 app.get('/api/admin/users', (req, res) => {
   res.json({ success: true, users });
 });
 
-app.put('/api/admin/users/:id/balance', (req, res) => {
-  const { id } = req.params;
-  const { amount, action } = req.body;
-  const user = users.find((u) => u.id === id);
-
-  if (!user) {
-    return res.status(404).json({ success: false, error: 'User not found' });
-  }
-
-  const num = Number(amount);
-  if (isNaN(num)) {
-    return res.status(400).json({ success: false, error: 'Invalid balance amount' });
-  }
-
-  if (action === 'set') {
-    user.balance = num;
-  } else if (action === 'add') {
-    user.balance += num;
-  } else if (action === 'deduct') {
-    user.balance = Math.max(0, user.balance - num);
-  }
-
-  res.json({ success: true, user, message: `User balance updated to ${user.balance} BDT` });
+// Fallback Route
+app.use((req, res) => {
+  res.status(404).json({ error: 'Route Not Found' });
 });
 
-app.put('/api/admin/users/:id/status', (req, res) => {
-  const { id } = req.params;
-  const { isBlocked } = req.body;
-  const user = users.find((u) => u.id === id);
-
-  if (!user) {
-    return res.status(404).json({ success: false, error: 'User not found' });
-  }
-
-  user.isBlocked = Boolean(isBlocked);
-  res.json({ success: true, user, message: `User ${user.isBlocked ? 'Blocked' : 'Unblocked'}` });
+// Server Listen
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
 });
-
-// Reset / Seed Demo Data helper
-app.post('/api/admin/seed-demo', (req, res) => {
-  appSettings = {
-    siteName: 'GmailBazar BD',
-    logoUrl: 'https://images.unsplash.com/photo-1557200134-90327ee9fafa?w=120&auto=format&fit=crop&q=80',
-    oldGmailPrice: 14,
-    newGmailPrice: 10,
-    referralBonus: 10,
-    minWithdrawAmount: 100,
-    autoVerifyGmails: true,
-    noticeText: '⚡ Instant Payment Alert: Old Gmails (2014-2023) rate is 14 BDT & Fresh Gmails rate is 10 BDT! Withdrawals processed within 10-30 minutes via bKash, Nagad & Rocket.',
-    banners: [
-      {
-        id: 'b1',
-        title: 'Sell Your Gmails at Highest Rates in BD',
-        subtitle: 'Old Gmail 14 BDT | New Gmail 10 BDT • 100% Guaranteed Cashout',
-        imageUrl: 'https://images.unsplash.com/photo-1579389083078-4e7018379f7e?w=1200&auto=format&fit=crop&q=80',
-        badge: 'TOP PAYING 2026',
-        linkText: 'Sell Now',
-      },
-      {
-        id: 'b2',
-        title: 'Invite Friends & Earn 10 BDT Per Active Seller',
-        subtitle: 'Get lifetime referral earnings when your friends sell their first approved Gmail batch.',
-        imageUrl: 'https://images.unsplash.com/photo-1556742049-0a67c5576839?w=1200&auto=format&fit=crop&q=80',
-        badge: 'REFERRAL BONUS',
-        linkText: 'Get Promo Code',
-      },
-      {
-        id: 'b3',
-        title: 'Instant Manual Payouts via bKash, Nagad & Rocket',
-        subtitle: 'Minimum cashout only 100 BDT. Safe, fast, and transparent processing.',
-        imageUrl: 'https://images.unsplash.com/photo-1559526324-4b87b5e36e44?w=1200&auto=format&fit=crop&q=80',
-        badge: 'FAST CASHOUT',
-        linkText: 'View Wallet',
-      },
-    ],
-    supportTelegram: 'https://t.me/gmailbazar_support',
-    supportWhatsApp: '+8801700000000',
-    paymentNotice: 'Payouts are made manually between 9:00 AM - 11:00 PM BST. Enter your personal bKash/Nagad/Rocket number correctly.',
-    developerProfile: {
-      name: 'Sayeem Sheikh',
-      role: 'Lead Developer & Automation Specialist',
-      avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=240&auto=format&fit=crop&q=80',
-      bio: 'Mobile-first Web & Full-stack Automation Specialist. Passionate about building seamless micro-earning apps, fast payout systems, and AI-powered diagnostic engines in Bangladesh.',
-      facebookUrl: 'https://facebook.com/sayeemsheikh.official',
-      tiktokUrl: 'https://tiktok.com/@sayeem_developer',
-      youtubeUrl: 'https://youtube.com/@SayeemTechBD',
-      websiteUrl1: 'https://github.com/sayeemsheikh',
-      websiteTitle1: 'Developer Portfolio & GitHub',
-      websiteUrl2: 'https://gmailbazar.com',
-      websiteTitle2: 'Official Web App Portal',
-      websiteUrl3: 'https://t.me/sayeem_dev',
-      websiteTitle3: 'Telegram Channel & Network',
-      email: 'sayeemsheikh12@gmail.com',
-      whatsapp: '+8801700000000',
-    },
-  };
-
-  res.json({ success: true, message: 'Demo data initialized successfully.' });
-});
-
-// -------------------------------------------------------------
-// VITE MIDDLEWARE & STATIC SERVING
-// -------------------------------------------------------------
-async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Gmail Marketplace Fullstack Server running on http://0.0.0.0:${PORT}`);
-  });
-}
-
-startServer();

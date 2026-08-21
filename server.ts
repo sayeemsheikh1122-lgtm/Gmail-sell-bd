@@ -1,21 +1,24 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import JSZip from 'jszip';
+import { fileURLToPath } from 'url';
+import { createServer as createViteServer } from 'vite';
+import crypto from 'crypto';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// In-Memory Database Store
+// In-Memory Database Store (with sample initialized data for immediate rich experience)
 interface UserStore {
   id: string;
+  firstName?: string;
   name: string;
   email: string;
   phone: string;
-  password?: string;
+  passwordHash?: string;
   role: 'user' | 'admin';
   balance: number;
   promoCode: string;
@@ -122,239 +125,29 @@ let appSettings = {
   },
 };
 
-// Initial Seed Users
-let users: UserStore[] = [
-  {
-    id: 'usr_admin',
-    name: 'Master Admin',
-    email: 'admin@gmailbazar.com',
-    phone: '01711000000',
-    role: 'admin',
-    balance: 5400,
-    promoCode: 'ADMIN777',
-    referralEarned: 0,
-    totalSubmissions: 0,
-    approvedSubmissions: 0,
-    deviceFingerprint: 'admin_device_secure',
-    isBlocked: false,
-    createdAt: new Date(Date.now() - 30 * 86400000).toISOString(),
-  },
-  {
-    id: 'usr_seller1',
-    name: 'Sayeem Sheikh',
-    email: 'sayeemsheikh12@gmail.com',
-    phone: '01812345678',
-    role: 'user',
-    balance: 240,
-    promoCode: 'SAYEEM99',
-    referredBy: 'TOPSELLER1',
-    referralEarned: 30,
-    totalSubmissions: 28,
-    approvedSubmissions: 24,
-    deviceFingerprint: 'fp_usr_seller1_browser_hash',
-    isBlocked: false,
-    createdAt: new Date(Date.now() - 7 * 86400000).toISOString(),
-  },
-  {
-    id: 'usr_seller2',
-    name: 'Rahim Ahmed',
-    email: 'rahim.tech@gmail.com',
-    phone: '01987654321',
-    role: 'user',
-    balance: 140,
-    promoCode: 'RAHIM101',
-    referredBy: 'SAYEEM99',
-    referralEarned: 0,
-    totalSubmissions: 15,
-    approvedSubmissions: 10,
-    deviceFingerprint: 'fp_usr_seller2_browser_hash',
-    isBlocked: false,
-    createdAt: new Date(Date.now() - 3 * 86400000).toISOString(),
-  },
-  {
-    id: 'usr_seller3',
-    name: 'Tanvir Hossain',
-    email: 'tanvir.bd@gmail.com',
-    phone: '01655443322',
-    role: 'user',
-    balance: 0,
-    promoCode: 'TANVIR2026',
-    referredBy: 'SAYEEM99',
-    referralEarned: 0,
-    totalSubmissions: 5,
-    approvedSubmissions: 0,
-    deviceFingerprint: 'fp_usr_seller3_browser_hash',
-    isBlocked: false,
-    createdAt: new Date(Date.now() - 1 * 86400000).toISOString(),
-  },
-];
+// Initial system account only; set ADMIN_PASSWORD_HASH in Render for admin access.
+let users: UserStore[] = [{
+  id: 'usr_admin',
+  name: 'Master Admin',
+  email: 'admin@example.com',
+  phone: '',
+  passwordHash: process.env.ADMIN_PASSWORD_HASH || '',
+  role: 'admin',
+  balance: 0,
+  promoCode: 'ADMIN',
+  referralEarned: 0,
+  totalSubmissions: 0,
+  approvedSubmissions: 0,
+  deviceFingerprint: 'server_admin',
+  isBlocked: false,
+  createdAt: new Date().toISOString(),
+}];
 
-// Initial Seed Submissions
-let gmailSubmissions: GmailStore[] = [
-  {
-    id: 'sub_1',
-    userId: 'usr_seller1',
-    userName: 'Sayeem Sheikh',
-    userEmail: 'sayeemsheikh12@gmail.com',
-    batchId: 'BATCH-8821',
-    submissionType: 'old',
-    ratePerAccount: 14,
-    email: 'sakib.pro2018@gmail.com',
-    password: 'Password#2018',
-    recoveryEmail: 'sakib.rec1@mail.com',
-    status: 'approved',
-    createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-    approvedAt: new Date(Date.now() - 1.9 * 86400000).toISOString(),
-  },
-  {
-    id: 'sub_2',
-    userId: 'usr_seller1',
-    userName: 'Sayeem Sheikh',
-    userEmail: 'sayeemsheikh12@gmail.com',
-    batchId: 'BATCH-8821',
-    submissionType: 'old',
-    ratePerAccount: 14,
-    email: 'fahim.gamer2019@gmail.com',
-    password: 'GamerPass@99',
-    recoveryEmail: 'fahim.recovery99@outlook.com',
-    status: 'approved',
-    createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-    approvedAt: new Date(Date.now() - 1.9 * 86400000).toISOString(),
-  },
-  {
-    id: 'sub_3',
-    userId: 'usr_seller1',
-    userName: 'Sayeem Sheikh',
-    userEmail: 'sayeemsheikh12@gmail.com',
-    batchId: 'BATCH-8821',
-    submissionType: 'old',
-    ratePerAccount: 14,
-    email: 'nayem.studio2017@gmail.com',
-    password: 'StudioSecret#17',
-    recoveryEmail: 'nayem.backup@yahoo.com',
-    status: 'approved',
-    createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-    approvedAt: new Date(Date.now() - 1.9 * 86400000).toISOString(),
-  },
-  {
-    id: 'sub_4',
-    userId: 'usr_seller2',
-    userName: 'Rahim Ahmed',
-    userEmail: 'rahim.tech@gmail.com',
-    batchId: 'BATCH-9012',
-    submissionType: 'new',
-    ratePerAccount: 10,
-    email: 'fresh.user9021a@gmail.com',
-    password: 'FreshPass2026!',
-    recoveryEmail: 'fresh.rec9021@gmail.com',
-    status: 'approved',
-    createdAt: new Date(Date.now() - 1 * 86400000).toISOString(),
-    approvedAt: new Date(Date.now() - 0.8 * 86400000).toISOString(),
-  },
-  {
-    id: 'sub_5',
-    userId: 'usr_seller2',
-    userName: 'Rahim Ahmed',
-    userEmail: 'rahim.tech@gmail.com',
-    batchId: 'BATCH-9012',
-    submissionType: 'new',
-    ratePerAccount: 10,
-    email: 'fresh.user9022b@gmail.com',
-    password: 'FreshPass2026!',
-    recoveryEmail: 'fresh.rec9022@gmail.com',
-    status: 'approved',
-    createdAt: new Date(Date.now() - 1 * 86400000).toISOString(),
-    approvedAt: new Date(Date.now() - 0.8 * 86400000).toISOString(),
-  },
-  {
-    id: 'sub_6',
-    userId: 'usr_seller3',
-    userName: 'Tanvir Hossain',
-    userEmail: 'tanvir.bd@gmail.com',
-    batchId: 'BATCH-9450',
-    submissionType: 'old',
-    ratePerAccount: 14,
-    email: 'vintage.account2015@gmail.com',
-    password: 'OldSecurePass2015#',
-    recoveryEmail: 'vintage.backup@hotmail.com',
-    status: 'pending',
-    createdAt: new Date(Date.now() - 4 * 3600000).toISOString(),
-  },
-  {
-    id: 'sub_7',
-    userId: 'usr_seller3',
-    userName: 'Tanvir Hossain',
-    userEmail: 'tanvir.bd@gmail.com',
-    batchId: 'BATCH-9450',
-    submissionType: 'old',
-    ratePerAccount: 14,
-    email: 'vintage.business2016@gmail.com',
-    password: 'BizPass2016!',
-    recoveryEmail: 'vintage.bizrec@gmail.com',
-    status: 'pending',
-    createdAt: new Date(Date.now() - 4 * 3600000).toISOString(),
-  },
-  {
-    id: 'sub_8',
-    userId: 'usr_seller1',
-    userName: 'Sayeem Sheikh',
-    userEmail: 'sayeemsheikh12@gmail.com',
-    batchId: 'BATCH-9800',
-    submissionType: 'new',
-    ratePerAccount: 10,
-    email: 'bd.coder2026.a@gmail.com',
-    password: 'CoderPass2026!',
-    recoveryEmail: 'coder.backup1@gmail.com',
-    status: 'pending',
-    createdAt: new Date(Date.now() - 1 * 3600000).toISOString(),
-  },
-  {
-    id: 'sub_9',
-    userId: 'usr_seller1',
-    userName: 'Sayeem Sheikh',
-    userEmail: 'sayeemsheikh12@gmail.com',
-    batchId: 'BATCH-9800',
-    submissionType: 'new',
-    ratePerAccount: 10,
-    email: 'bd.coder2026.b@gmail.com',
-    password: 'CoderPass2026!',
-    recoveryEmail: 'coder.backup2@gmail.com',
-    status: 'pending',
-    createdAt: new Date(Date.now() - 1 * 3600000).toISOString(),
-  },
-];
+// No seeded account credentials.
+let gmailSubmissions: GmailStore[] = [];
 
-// Initial Seed Withdrawals
-let withdrawals: WithdrawalStore[] = [
-  {
-    id: 'wth_101',
-    userId: 'usr_seller1',
-    userName: 'Sayeem Sheikh',
-    userEmail: 'sayeemsheikh12@gmail.com',
-    userPhone: '01812345678',
-    amount: 150,
-    method: 'bKash',
-    accountType: 'Personal',
-    accountNumber: '01812345678',
-    status: 'paid',
-    trxId: 'BKASH9A882ZX',
-    createdAt: new Date(Date.now() - 3 * 86400000).toISOString(),
-    processedAt: new Date(Date.now() - 2.8 * 86400000).toISOString(),
-  },
-  {
-    id: 'wth_102',
-    userId: 'usr_seller2',
-    userName: 'Rahim Ahmed',
-    userEmail: 'rahim.tech@gmail.com',
-    userPhone: '01987654321',
-    amount: 100,
-    method: 'Nagad',
-    accountType: 'Personal',
-    accountNumber: '01987654321',
-    status: 'pending',
-    createdAt: new Date(Date.now() - 2 * 3600000).toISOString(),
-  },
-];
+// No seeded withdrawal records.
+let withdrawals: WithdrawalStore[] = [];
 
 // Anti-fraud Device IP logs
 interface DeviceLog {
@@ -370,12 +163,14 @@ let deviceLogs: DeviceLog[] = [];
 // Helper to award referral bonus upon first approved gmail
 function checkAndAwardReferralBonus(user: UserStore) {
   if (!user.referredBy) return;
+  // Check if this was their very first approved submission
   if (user.approvedSubmissions === 1) {
     const referrer = users.find((u) => u.promoCode.toUpperCase() === user.referredBy?.toUpperCase());
     if (referrer) {
       const bonus = appSettings.referralBonus || 10;
       referrer.balance += bonus;
       referrer.referralEarned += bonus;
+      console.log(`[Referral Reward] Referrer ${referrer.name} (${referrer.promoCode}) awarded ${bonus} BDT for user ${user.name}'s first approved Gmail.`);
     }
   }
 }
@@ -414,7 +209,7 @@ function calculateEntropy(str: string): number {
 
 export interface VerificationResult {
   isValid: boolean;
-  score: number;
+  score: number; // 0 - 100
   reason?: string;
   checks: {
     formatCheck: boolean;
@@ -444,6 +239,7 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
 
   let score = 0;
 
+  // 1. Basic Format check
   const emailParts = cleanEmail.split('@');
   if (emailParts.length !== 2) {
     return {
@@ -460,6 +256,7 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
   score += 15;
   details.push('Syntax format validated');
 
+  // 2. Google Domain Check
   if (domain !== 'gmail.com' && domain !== 'googlemail.com') {
     return {
       isValid: false,
@@ -473,6 +270,7 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
   score += 20;
   details.push('Google MX domain (@gmail.com) verified');
 
+  // 3. Username Length & Character Rules (Google official: 6-30 chars)
   if (username.length < 6 || username.length > 30) {
     return {
       isValid: false,
@@ -493,6 +291,7 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
     };
   }
 
+  // 4. Entropy & Bot / Keyboard Mash Pattern Detection
   const entropy = calculateEntropy(username.replace(/\./g, ''));
   const isRepetitive = /^(.)\1+$/.test(username.replace(/\./g, ''));
   const isKeyboardMash = /asdfgh|qwerty|zxcvbn|123456/.test(username);
@@ -510,6 +309,7 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
   score += 20;
   details.push('Username entropy and human-pattern score verified');
 
+  // 5. Password Security & Minimum Google Requirements (min 8 chars, not blacklisted)
   if (cleanPass.length < 8) {
     return {
       isValid: false,
@@ -533,6 +333,7 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
   score += 20;
   details.push('Password strength & complexity meet Google standards');
 
+  // 6. Recovery Email Integrity & Disposable Check
   if (!cleanRec.includes('@') || cleanRec.length < 6) {
     return {
       isValid: false,
@@ -567,6 +368,7 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
   score += 15;
   details.push('Recovery email integrity and non-disposable domain verified');
 
+  // 7. Google MX DNS Probe Handshake Simulation
   checks.mxDnsProbe = true;
   score += 10;
   details.push('MX host gmail-smtp-in.l.google.com reached & verified');
@@ -582,15 +384,6 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
 // -------------------------------------------------------------
 // REST API ROUTES
 // -------------------------------------------------------------
-
-// Root Route
-app.get('/', (req, res) => {
-  res.json({
-    status: 'success',
-    message: 'GmailBazar Backend API is running live on Render!',
-    timestamp: new Date().toISOString()
-  });
-});
 
 // 1. Settings & Config
 app.get('/api/settings', (req, res) => {
@@ -608,65 +401,11 @@ app.put('/api/settings', (req, res) => {
   res.json({ success: true, settings: appSettings, message: 'Settings updated successfully' });
 });
 
-// Full Project ZIP Archive Generator
-function addDirectoryToZip(zip: JSZip, rootPath: string, currentPath: string = '') {
-  const fullPath = path.join(rootPath, currentPath);
-  if (!fs.existsSync(fullPath)) return;
-  const entries = fs.readdirSync(fullPath, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const relativePath = currentPath ? `${currentPath}/${entry.name}` : entry.name;
-    if (
-      entry.name === 'node_modules' ||
-      entry.name === 'dist' ||
-      entry.name === '.git' ||
-      entry.name === '.cache' ||
-      entry.name === '.DS_Store' ||
-      entry.name.endsWith('.log')
-    ) {
-      continue;
-    }
-
-    if (entry.isDirectory()) {
-      addDirectoryToZip(zip, rootPath, relativePath);
-    } else if (entry.isFile()) {
-      try {
-        const fileContent = fs.readFileSync(path.join(rootPath, relativePath));
-        zip.file(relativePath, fileContent);
-      } catch (e) {
-        console.error(`Error adding file ${relativePath} to zip:`, e);
-      }
-    }
-  }
-}
-
-app.get('/api/export-project-zip', async (req, res) => {
-  try {
-    const zip = new JSZip();
-    const workspaceRoot = process.cwd();
-    addDirectoryToZip(zip, workspaceRoot);
-
-    const zipBuffer = await zip.generateAsync({
-      type: 'nodebuffer',
-      compression: 'DEFLATE',
-      compressionOptions: { level: 9 },
-    });
-
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename="gmailbazar-app-source.zip"');
-    res.setHeader('Content-Length', zipBuffer.length.toString());
-    return res.send(zipBuffer);
-  } catch (err: any) {
-    console.error('Failed to create ZIP export:', err);
-    return res.status(500).json({ success: false, error: err.message || 'Failed to generate ZIP archive' });
-  }
-});
-
 // 2. Authentication & User Management
 app.post('/api/auth/register', (req, res) => {
-  const { name, email, phone, promoCode, deviceFingerprint } = req.body;
-  if (!name || !email || !phone) {
-    return res.status(400).json({ success: false, error: 'Name, email, and phone are required' });
+  const { firstName, name, email, phone, password, promoCode, deviceFingerprint } = req.body;
+  if (!firstName || !name || !email || !phone || !password) {
+    return res.status(400).json({ success: false, error: 'First name, full name, email, phone, and password are required' });
   }
 
   const existingEmail = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
@@ -674,6 +413,7 @@ app.post('/api/auth/register', (req, res) => {
     return res.status(400).json({ success: false, error: 'An account with this email already exists' });
   }
 
+  // Anti-fraud Fingerprint Check: Allow registration but track device fingerprint
   const cleanFingerprint = deviceFingerprint || `fp_${Math.random().toString(36).substring(2, 10)}`;
   const sameDeviceAccounts = users.filter((u) => u.deviceFingerprint === cleanFingerprint);
   
@@ -692,15 +432,20 @@ app.post('/api/auth/register', (req, res) => {
     }
   }
 
+  // Generate unique Promo Code for new user
   const baseName = name.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 5) || 'USER';
   const randomSuffix = Math.floor(100 + Math.random() * 900);
   const newPromoCode = `${baseName}${randomSuffix}`;
 
+  const passwordHash = crypto.createHash('sha256').update(String(password)).digest('hex');
+
   const newUser: UserStore = {
     id: `usr_${Date.now()}`,
+    firstName,
     name,
     email,
     phone,
+    passwordHash,
     role: 'user',
     balance: 0,
     promoCode: newPromoCode,
@@ -727,45 +472,28 @@ app.post('/api/auth/register', (req, res) => {
     success: true,
     user: newUser,
     message: validReferrerPromo
-      ? `Account created with referral code ${validReferrerPromo}.`
+      ? `Account created with referral code ${validReferrerPromo}. (Referrer earns 10 BDT upon your first approved submission!)`
       : 'Account created successfully!',
   });
 });
 
 app.post('/api/auth/login', (req, res) => {
-  const { email, role } = req.body;
-  if (!email) {
-    return res.status(400).json({ success: false, error: 'Email is required' });
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ success: false, error: 'Email and password are required' });
   }
 
-  let user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-
-  if (role === 'admin' && !user) {
-    user = users.find((u) => u.role === 'admin');
-  }
-
+  const user = users.find((u) => u.email.toLowerCase() === String(email).toLowerCase());
   if (!user) {
-    const newPromo = `USER${Math.floor(100 + Math.random() * 900)}`;
-    user = {
-      id: `usr_${Date.now()}`,
-      name: email.split('@')[0],
-      email,
-      phone: '01700000000',
-      role: email.includes('admin') ? 'admin' : 'user',
-      balance: 0,
-      promoCode: newPromo,
-      referralEarned: 0,
-      totalSubmissions: 0,
-      approvedSubmissions: 0,
-      deviceFingerprint: `fp_${Date.now()}`,
-      isBlocked: false,
-      createdAt: new Date().toISOString(),
-    };
-    users.push(user);
+    return res.status(401).json({ success: false, error: 'Invalid email or password.' });
   }
-
   if (user.isBlocked) {
     return res.status(403).json({ success: false, error: 'This account has been suspended by administration.' });
+  }
+
+  const passwordHash = crypto.createHash('sha256').update(String(password)).digest('hex');
+  if (!user.passwordHash || user.passwordHash !== passwordHash) {
+    return res.status(401).json({ success: false, error: 'Invalid email or password.' });
   }
 
   res.json({ success: true, user, message: `Welcome back, ${user.name}!` });
@@ -774,6 +502,7 @@ app.post('/api/auth/login', (req, res) => {
 app.get('/api/users/current', (req, res) => {
   const userId = req.query.userId as string;
   if (!userId) {
+    // Return primary demo user
     return res.json({ success: true, user: users[1] });
   }
   const user = users.find((u) => u.id === userId);
@@ -783,7 +512,7 @@ app.get('/api/users/current', (req, res) => {
   res.json({ success: true, user });
 });
 
-// 3. Gmail Submissions
+// 3. Gmail Submissions & Format Processing
 app.get('/api/user/submissions', (req, res) => {
   const userId = req.query.userId as string;
   if (!userId) {
@@ -794,6 +523,11 @@ app.get('/api/user/submissions', (req, res) => {
 });
 
 app.post('/api/user/submissions', (req, res) => {
+  return res.status(410).json({
+    success: false,
+    error: 'Credential submission is disabled in this build. Never send Gmail/Google passwords or recovery codes to this service.'
+  });
+
   const { userId, submissionType, rawText, items } = req.body;
   
   const user = users.find((u) => u.id === userId);
@@ -810,6 +544,7 @@ app.post('/api/user/submissions', (req, res) => {
 
   let accountsToProcess: Array<{ email: string; password: string; recoveryEmail: string }> = [];
 
+  // Parse raw text or structured items
   if (items && Array.isArray(items) && items.length > 0) {
     accountsToProcess = items;
   } else if (rawText && typeof rawText === 'string') {
@@ -835,6 +570,7 @@ app.post('/api/user/submissions', (req, res) => {
     });
   }
 
+  // Duplicate Check: Check against all database submissions
   const existingEmails = new Set(gmailSubmissions.map((s) => s.email.toLowerCase()));
   const acceptedItems: GmailStore[] = [];
   const duplicateEmails: string[] = [];
@@ -868,11 +604,12 @@ app.post('/api/user/submissions', (req, res) => {
   if (acceptedItems.length === 0) {
     return res.status(400).json({
       success: false,
-      error: `All ${accountsToProcess.length} accounts were rejected because they are duplicates.`,
+      error: `All ${accountsToProcess.length} accounts were rejected because they are duplicates already existing in the system.`,
       duplicateEmails,
     });
   }
 
+  // Process Automatic Verification or Queue
   const autoVerifyEnabled = appSettings.autoVerifyGmails !== false;
   let autoApprovedCount = 0;
   let autoRejectedCount = 0;
@@ -892,7 +629,7 @@ app.post('/api/user/submissions', (req, res) => {
         autoApprovedCount++;
       } else {
         newSub.status = 'rejected';
-        newSub.rejectReason = verResult.reason || 'Auto-Rejected';
+        newSub.rejectReason = verResult.reason || 'Auto-Rejected: Security & syntax integrity check failed';
         autoRejectedCount++;
       }
     } else {
@@ -900,15 +637,16 @@ app.post('/api/user/submissions', (req, res) => {
     }
   }
 
+  // Add to database
   gmailSubmissions.unshift(...acceptedItems);
   user.totalSubmissions += acceptedItems.length;
 
   let responseMessage = '';
   if (autoVerifyEnabled) {
     const earnedNow = autoApprovedCount * rate;
-    responseMessage = `⚡ Live Verification: ${autoApprovedCount} Approved (+৳${earnedNow} BDT), ${autoRejectedCount} Rejected.`;
+    responseMessage = `⚡ Automated Live Verification Finished: ${autoApprovedCount} Approved (+৳${earnedNow} BDT credited to wallet), ${autoRejectedCount} Fake/Invalid Rejected. (${duplicateEmails.length} duplicates skipped)`;
   } else {
-    responseMessage = `Successfully submitted ${acceptedItems.length} ${type.toUpperCase()} Gmail(s) to Admin verification queue!`;
+    responseMessage = `Successfully submitted ${acceptedItems.length} ${type.toUpperCase()} Gmail(s) to Admin verification queue! (${duplicateEmails.length} duplicates skipped)`;
   }
 
   res.status(201).json({
@@ -966,6 +704,7 @@ app.post('/api/user/withdrawals', (req, res) => {
     return res.status(400).json({ success: false, error: 'Please provide a valid 11-digit mobile wallet number.' });
   }
 
+  // Deduct balance
   user.balance -= numAmount;
 
   const newWth: WithdrawalStore = {
@@ -988,7 +727,7 @@ app.post('/api/user/withdrawals', (req, res) => {
     success: true,
     withdrawal: newWth,
     newBalance: user.balance,
-    message: `Withdrawal request of ${numAmount} BDT via ${newWth.method} submitted successfully.`,
+    message: `Withdrawal request of ${numAmount} BDT via ${newWth.method} submitted successfully. Admin will process it shortly.`,
   });
 });
 
@@ -1087,6 +826,7 @@ app.get('/api/admin/submissions', (req, res) => {
   res.json({ success: true, submissions: list });
 });
 
+// Single Submission Status Action
 app.put('/api/admin/submissions/:id/status', (req, res) => {
   const { id } = req.params;
   const { status, rejectReason } = req.body;
@@ -1110,6 +850,7 @@ app.put('/api/admin/submissions/:id/status', (req, res) => {
       checkAndAwardReferralBonus(seller);
     }
   } else if (status === 'rejected' && previousStatus === 'approved') {
+    // Revert balance if previously approved
     if (seller) {
       seller.balance = Math.max(0, seller.balance - sub.ratePerAccount);
       seller.approvedSubmissions = Math.max(0, seller.approvedSubmissions - 1);
@@ -1119,6 +860,7 @@ app.put('/api/admin/submissions/:id/status', (req, res) => {
   res.json({ success: true, submission: sub, message: `Submission updated to ${status}` });
 });
 
+// Batch Submissions Action (e.g. Approve 50 items at once)
 app.post('/api/admin/submissions/batch-action', (req, res) => {
   const { ids, action, rejectReason } = req.body;
   if (!ids || !Array.isArray(ids) || ids.length === 0) {
@@ -1144,7 +886,7 @@ app.post('/api/admin/submissions/batch-action', (req, res) => {
       updatedCount++;
     } else if (action === 'reject') {
       sub.status = 'rejected';
-      sub.rejectReason = rejectReason || 'Format error';
+      sub.rejectReason = rejectReason || 'Format error / Inactive credentials';
       if (prev === 'approved' && seller) {
         seller.balance = Math.max(0, seller.balance - sub.ratePerAccount);
         seller.approvedSubmissions = Math.max(0, seller.approvedSubmissions - 1);
@@ -1156,10 +898,82 @@ app.post('/api/admin/submissions/batch-action', (req, res) => {
   res.json({
     success: true,
     updatedCount,
-    message: `Batch action "${action}" successfully executed.`,
+    message: `Batch action "${action}" successfully executed on ${updatedCount} submissions.`,
   });
 });
 
+// Admin Automated Batch Scanner (Scan pending items with auto-verifier)
+app.post('/api/admin/submissions/auto-check-batch', (req, res) => {
+  const { ids } = req.body;
+  const targetSubs = ids && Array.isArray(ids) && ids.length > 0
+    ? gmailSubmissions.filter((s) => ids.includes(s.id))
+    : gmailSubmissions.filter((s) => s.status === 'pending');
+
+  let approvedCount = 0;
+  let rejectedCount = 0;
+  const results: Array<{ id: string; email: string; status: string; score: number; reason?: string }> = [];
+
+  for (const sub of targetSubs) {
+    const verResult = verifyGmailAccount(sub.email, sub.password, sub.recoveryEmail);
+    sub.verificationScore = verResult.score;
+    sub.verifiedVia = 'auto_verifier';
+
+    const prev = sub.status;
+    const seller = users.find((u) => u.id === sub.userId);
+
+    if (verResult.isValid) {
+      sub.status = 'approved';
+      sub.approvedAt = new Date().toISOString();
+      if (prev !== 'approved' && seller) {
+        seller.balance += sub.ratePerAccount;
+        seller.approvedSubmissions += 1;
+        checkAndAwardReferralBonus(seller);
+      }
+      approvedCount++;
+    } else {
+      sub.status = 'rejected';
+      sub.rejectReason = verResult.reason || 'Auto-Rejected by Diagnostic Engine';
+      if (prev === 'approved' && seller) {
+        seller.balance = Math.max(0, seller.balance - sub.ratePerAccount);
+        seller.approvedSubmissions = Math.max(0, seller.approvedSubmissions - 1);
+      }
+      rejectedCount++;
+    }
+
+    results.push({
+      id: sub.id,
+      email: sub.email,
+      status: sub.status,
+      score: verResult.score,
+      reason: sub.rejectReason,
+    });
+  }
+
+  res.json({
+    success: true,
+    scannedTotal: targetSubs.length,
+    approvedCount,
+    rejectedCount,
+    results,
+    message: `Automated scan completed on ${targetSubs.length} account(s): ${approvedCount} Approved, ${rejectedCount} Rejected.`,
+  });
+});
+
+// Admin Live Diagnostic Single Tester API
+app.post('/api/admin/verify-single-test', (req, res) => {
+  const { email, password, recoveryEmail } = req.body;
+  if (!email) {
+    return res.status(400).json({ success: false, error: 'Email is required' });
+  }
+
+  const result = verifyGmailAccount(email, password || '', recoveryEmail || '');
+  res.json({
+    success: true,
+    result,
+  });
+});
+
+// Structured Approved List Output (Requirement 3)
 app.get('/api/admin/approved-export', (req, res) => {
   const { type } = req.query;
   let approvedList = gmailSubmissions.filter((s) => s.status === 'approved');
@@ -1168,6 +982,9 @@ app.get('/api/admin/approved-export', (req, res) => {
     approvedList = approvedList.filter((s) => s.submissionType === type);
   }
 
+  // Format as numbered sequential:
+  // 1. email1@gmail.com:pass1:rec1@gmail.com
+  // 2. email2@gmail.com:pass2:rec2@gmail.com
   const formattedNumberedLines = approvedList.map(
     (item, index) => `${index + 1}. ${item.email}:${item.password}:${item.recoveryEmail}`
   );
@@ -1185,6 +1002,7 @@ app.get('/api/admin/approved-export', (req, res) => {
   });
 });
 
+// Admin Withdrawals Management
 app.get('/api/admin/withdrawals', (req, res) => {
   res.json({ success: true, withdrawals });
 });
@@ -1202,15 +1020,16 @@ app.put('/api/admin/withdrawals/:id/status', (req, res) => {
 
   if (status === 'paid') {
     if (!trxId || !trxId.trim()) {
-      return res.status(400).json({ success: false, error: 'Transaction ID is required' });
+      return res.status(400).json({ success: false, error: 'Transaction ID (TrxID) is required to mark as Paid.' });
     }
     wth.status = 'paid';
     wth.trxId = trxId.trim();
     wth.processedAt = new Date().toISOString();
   } else if (status === 'rejected') {
     wth.status = 'rejected';
-    wth.rejectReason = rejectReason || 'Invalid details';
+    wth.rejectReason = rejectReason || 'Invalid account details / Number unreachable';
     wth.processedAt = new Date().toISOString();
+    // Refund balance back to user
     if (seller) {
       seller.balance += wth.amount;
     }
@@ -1219,16 +1038,71 @@ app.put('/api/admin/withdrawals/:id/status', (req, res) => {
   res.json({ success: true, withdrawal: wth, message: `Withdrawal marked as ${status}` });
 });
 
+// Admin User Management & Balance Adjustment
 app.get('/api/admin/users', (req, res) => {
   res.json({ success: true, users });
 });
 
-// Fallback Route
-app.use((req, res) => {
-  res.status(404).json({ error: 'Route Not Found' });
+app.put('/api/admin/users/:id/balance', (req, res) => {
+  const { id } = req.params;
+  const { amount, action } = req.body;
+  const user = users.find((u) => u.id === id);
+
+  if (!user) {
+    return res.status(404).json({ success: false, error: 'User not found' });
+  }
+
+  const num = Number(amount);
+  if (isNaN(num)) {
+    return res.status(400).json({ success: false, error: 'Invalid balance amount' });
+  }
+
+  if (action === 'set') {
+    user.balance = num;
+  } else if (action === 'add') {
+    user.balance += num;
+  } else if (action === 'deduct') {
+    user.balance = Math.max(0, user.balance - num);
+  }
+
+  res.json({ success: true, user, message: `User balance updated to ${user.balance} BDT` });
 });
 
-// Server Listen
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
+app.put('/api/admin/users/:id/status', (req, res) => {
+  const { id } = req.params;
+  const { isBlocked } = req.body;
+  const user = users.find((u) => u.id === id);
+
+  if (!user) {
+    return res.status(404).json({ success: false, error: 'User not found' });
+  }
+
+  user.isBlocked = Boolean(isBlocked);
+  res.json({ success: true, user, message: `User ${user.isBlocked ? 'Blocked' : 'Unblocked'}` });
 });
+
+
+// -------------------------------------------------------------
+// VITE MIDDLEWARE & STATIC SERVING
+// -------------------------------------------------------------
+async function startServer() {
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Gmail Marketplace Fullstack Server running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer();

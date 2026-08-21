@@ -1,12 +1,19 @@
 import express from 'express';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import crypto from 'crypto';
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
+
+// Render/Netlify cross-origin API access. No external CORS package required.
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -385,6 +392,10 @@ export function verifyGmailAccount(email: string, pass: string, rec: string): Ve
 // REST API ROUTES
 // -------------------------------------------------------------
 
+app.get('/health', (_req, res) => {
+  res.json({ success: true, service: 'gmailbazar-api', status: 'ok' });
+});
+
 // 1. Settings & Config
 app.get('/api/settings', (req, res) => {
   res.json({ success: true, settings: appSettings });
@@ -502,8 +513,7 @@ app.post('/api/auth/login', (req, res) => {
 app.get('/api/users/current', (req, res) => {
   const userId = req.query.userId as string;
   if (!userId) {
-    // Return primary demo user
-    return res.json({ success: true, user: users[1] });
+    return res.status(400).json({ success: false, error: 'userId is required' });
   }
   const user = users.find((u) => u.id === userId);
   if (!user) {
@@ -1083,25 +1093,13 @@ app.put('/api/admin/users/:id/status', (req, res) => {
 
 
 // -------------------------------------------------------------
-// VITE MIDDLEWARE & STATIC SERVING
+// API SERVER
+// The user panel is hosted separately on Netlify, so Render only serves the API.
+// This avoids requiring a missing dist/index.html on the backend service.
 // -------------------------------------------------------------
-async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
+function startServer() {
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Gmail Marketplace Fullstack Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Gmail Marketplace API running on http://0.0.0.0:${PORT}`);
   });
 }
 
